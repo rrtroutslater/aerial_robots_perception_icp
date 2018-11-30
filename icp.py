@@ -92,7 +92,7 @@ def find_closest_points(x, y):
 
 
 
-def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False):
+def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, guess=None):
     """
     inputs:
         - x: numpy array (N x 3), source point cloud (new measurement)
@@ -115,7 +115,7 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False):
 
     num_iter = 0
     dist = []
-    dist.append(np.inf)
+    dist_current = np.inf
 
     # cumulative rotations and translations
     t_total = np.zeros(shape=(3,))    
@@ -130,33 +130,45 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False):
     t_est = np.zeros(shape=(3,))
     ests = []
 
-    while num_iter < max_iter:
-        # re-order points via PCA to minimized distance between point clouds
-        if not ideal:
-            x_est = find_closest_points(x_est, y)
+    while num_iter < max_iter and dist_current > threshold:
+        # allow for an initial guess of affine transform
+        if num_iter == 0 and guess is not None:
+            x_homog = to_homogeneous(x_est)
+            print('\n\n applying guess')
+            assert guess.shape == affine_est.shape
+            R_T = np.linalg.inv(guess[:,:3])
+            guess[:,:3] = R_T
+            affine_est = guess
+            x_est = np.dot(affine_est, x_homog.T).T
+        else:
+            # re-order points via PCA to minimized distance between point clouds
+            if not ideal:
+                x_est = find_closest_points(x_est, y)
 
-        # estimates of rotation (angles a), translation (distances t)
-        a_est, t_est, _ = find_affine_transform(x_est, y)
+            # estimates of rotation (angles a), translation (distances t)
+            a_est, t_est, _ = find_affine_transform(x_est, y)
+            x_homog = to_homogeneous(x_est)
 
-        x_homog = to_homogeneous(x_est)
-        x_est, affine_update = affine(x_homog, a_est, t_est, inverse=True)
+            x_est, affine_update = affine(x_homog, a_est, t_est, inverse=True)
+            # update total translations and rotations
+            t_total += -1*affine_update[:,3]                   # translation update addative
+            R_total = np.dot(affine_update[:,:3].T, R_total)   # rotation update left multiply
+            affine_est[:, :3] = R_total
+            affine_est[:, 3] = t_total
 
-        # update total translations and rotations
-        t_total += -1*affine_update[:,3]                   # translation update addative
-        R_total = np.dot(affine_update[:,:3].T, R_total)   # rotation update left multiply
-        affine_est[:, :3] = R_total
-        affine_est[:, 3] = t_total
+        print( "\naffine est shape:", affine_est.shape)
 
         dist.append(np.mean((x_est - y)**2))
         ests.append(affine_est)
+        dist_current = dist[num_iter] - dist[num_iter-1]
 
-        # printout and plots
         num_iter += 1
         print('\niteration:', num_iter)
         print('estimated rotation:\n', a_est)
         print('estimated translation:\n', t_est)
         print('average point-to-point distance:\n', dist)
         print('affine estimate:\n', affine_est)
+
         if num_iter % log_frequency == 0:
             fig = plt.figure()
             ax = Axes3D(fig)
@@ -170,14 +182,10 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False):
             plt.legend(loc=2)
             plt.show()
     
-        # check for convergence
-        if np.abs(dist[num_iter-1] - dist[num_iter-2]) <  threshold:
-            break
-
     if num_iter >= max_iter:
         print('\nmax iterations exceeded before convergence')
 
-    if np.abs(dist[num_iter-1]-dist[num_iter-2]) < threshold:
+    if dist[num_iter-1] - dist[num_iter-2] < threshold:
         print('\nconverged after ' + str(num_iter) + ' iterations:', dist[num_iter-1])
 
     # return ests, dist
