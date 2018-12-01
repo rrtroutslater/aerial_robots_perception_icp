@@ -1,8 +1,8 @@
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
 import matplotlib.pyplot as plt 
 from mpl_toolkits.mplot3d import Axes3D
 from util import *
+import features;
 
 def find_affine_transform(x, y):
     """ 
@@ -64,32 +64,56 @@ def find_affine_transform(x, y):
 
     return rpy, t, R
 
-
-def find_closest_points(x, y):
+def get_correspondence_points(x, y, criterium):
     """
-    re-order points in x so that distance between points in x and y is minimized
-    based on:
-    https://github.com/ClayFlannigan/icp/blob/master/icp.py
+    Selects the points in x where the distance is minimum for each point in y given a criterium.
+
+    Note: Does not check if the size of x and y are the same. Consequence: if #x > #y, at least two points in x
+    will have the same correspondence for sure. If #x < #y, however, no problem should arise. In principle, we
+    expect x and y to have N points.
+
+    inputs:
+        - x: numpy array (N x 3), source point cloud (new measurement)
+        - y: numpy array (N x 3), destination point cloud (previous measurement)
+        - criterium: string, criterium for correspondence. Can be 'distance', 'feature' or 'both'
+    outputs:
+        - y_new: numpy array (N x 3), points in y that match the points in x (in sequence)
     """
 
-    # TODO: determine if this is correct...
-    # normalize and 0-center
-    # x_c = (x - np.mean(x, axis=0))/ np.std(x, axis=0) * np.sqrt(x.shape[0])
-    # y_c = (y - np.mean(y, axis=0))/ np.std(y, axis=0) * np.sqrt(y.shape[0])
-    # M = np.dot(x_c.T, y_c)
-    # vals, vecs = np.linalg.eig(M)
-    # print('vals:\n', vals)
-    # print('vecs:\n', vecs)
+    # Convert X and Y to list of points
+    Y = [];
+    X = [];
+    for i in range(y.shape[0]):
+        Y.append(y[i]);
+    for i in range(x.shape[0]):
+        X.append(x[i]);
 
-    n = NearestNeighbors(n_neighbors=1)
-    n.fit(x)
+    # Compute features
+    X_feat = features.smoothnessFeatures(X);
+    Y_feat = features.smoothnessFeatures(Y);
+    
+    # Matching
+    match_list = [];
+    for i in range(x.shape[0]):
+        idx = -1;
+        if(criterium == "distance"):
+            idx,_ = features.matchByDistance(X[i], Y);
+        elif(criterium == "feature"):
+            idx,_ = features.matchByFeature(X_feat[i], Y_feat);
+        elif(criterium == "both"):
+            idx,_ = features.matchWeighted(X[i], X_feat[i], Y, Y_feat, w_d=0.5, w_f=0.5);
+        else:
+            raise Exception("Invalid criterium");
+        if(idx == -1):
+            raise Exception("An error occurred: idx was not changed");
+        match_list.append(idx);
 
-    distances, indices = n.kneighbors(y, return_distance=True)
-
-    x_new = x[indices].reshape(x.shape)
-
-    return x_new
-
+    # Correspondence cloud - size of x
+    y_new = np.zeros_like(x);
+    for i in range(y_new.shape[0]):
+        idx = match_list[i];
+        y_new[i] = y[idx];
+    return y_new;
 
 
 def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, guess=None):
@@ -97,15 +121,15 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, 
     inputs:
         - x: numpy array (N x 3), source point cloud (new measurement)
         - y: numpy array (N x 3), destination point cloud (previous measurement)
-        - threshold: convergence threshold
-        - max_iter: maximum number of iterations
-        - log_frequency: # of iterations between plotting source/destination pointclouds
-        - ideal: if true, 
+        - threshold: float, convergence threshold
+        - max_iter: integer, maximum number of iterations
+        - log_frequency: integer, # of iterations between plotting source/destination pointclouds
+        - ideal: boolean, if true all points are already aligned
+        - guess: affine matrix used as initial guess for a transform. * Use the inverse tranformation, not the true 
 
     outputs:
         - affine_est: numpy array (3 x 4), estimate of affine transform between source 
         and destination pointclouds at each iteration
-
         - dist: list of average pt-pt distances for each iteration
     """
 
@@ -130,37 +154,39 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, 
     t_est = np.zeros(shape=(3,))
     ests = []
 
-    while num_iter < max_iter and dist_current > threshold:
-        # allow for an initial guess of affine transform
-        if num_iter == 0 and guess is not None:
-            x_homog = to_homogeneous(x_est)
-            print('\n\n applying guess')
-            assert guess.shape == affine_est.shape
-            R_T = np.linalg.inv(guess[:,:3])
-            guess[:,:3] = R_T
-            affine_est = guess
-            x_est = np.dot(affine_est, x_homog.T).T
-        else:
-            # re-order points via PCA to minimized distance between point clouds
-            if not ideal:
-                x_est = find_closest_points(x_est, y)
+    # allow for an initial guess of affine transform
+    if num_iter == 0 and guess is not None:
+        x_homog = to_homogeneous(x_est);
+        print('\n \n Applying guess');
+        assert guess.shape == affine_est.shape;
+        R_T = np.linalg.inv(guess[:,:3]);
+        guess[:,:3] = R_T;
+        affine_est = guess;
+        x_est = np.dot(affine_est, x_homog.T).T;
 
-            # estimates of rotation (angles a), translation (distances t)
-            a_est, t_est, _ = find_affine_transform(x_est, y)
-            x_homog = to_homogeneous(x_est)
+    while num_iter < max_iter and abs(dist_current) > threshold:
+        # re-order points via PCA to minimized distance between point clouds
+        if not ideal:
+            y_est = get_correspondence_points(x_est, y, 'both')
 
-            x_est, affine_update = affine(x_homog, a_est, t_est, inverse=True)
-            # update total translations and rotations
-            t_total += -1*affine_update[:,3]                   # translation update addative
-            R_total = np.dot(affine_update[:,:3].T, R_total)   # rotation update left multiply
-            affine_est[:, :3] = R_total
-            affine_est[:, 3] = t_total
+        # estimates of rotation (angles a), translation (distances t)
+        a_est, t_est, _ = find_affine_transform(x_est, y_est)
+        x_homog = to_homogeneous(x_est)
+
+        next_x, affine_update = affine(x_homog, a_est, t_est, inverse=True)
+        # update total translations and rotations
+        t_total += -1*affine_update[:,3]                   # translation update addative
+        R_total = np.dot(affine_update[:,:3].T, R_total)   # rotation update left multiply
+        affine_est[:, :3] = R_total
+        affine_est[:, 3] = t_total
 
         print( "\naffine est shape:", affine_est.shape)
 
-        dist.append(np.mean((x_est - y)**2))
+        dist.append(np.mean((next_x - y)**2))
         ests.append(affine_est)
-        dist_current = dist[num_iter] - dist[num_iter-1]
+        dist_current = dist[num_iter]
+        if(num_iter != 0):
+            dist_current -= dist[num_iter-1];
 
         num_iter += 1
         print('\niteration:', num_iter)
@@ -174,13 +200,15 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, 
             ax = Axes3D(fig)
             ax.scatter(y[:,0], y[:,1], y[:,2], label='original')
             ax.scatter(x[:,0], x[:,1], x[:,2], label='transformed')
-            ax.scatter(x_est[:,0], x_est[:,1], x_est[:,2], label='estimated', s=30)
+            ax.scatter(next_x[:,0], next_x[:,1], next_x[:,2], label='estimated', s=30)
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_zlabel('z')
             plt.title('Iteration: %i. Avg pt-pt dist: %f' %(num_iter, dist[num_iter-1]))
             plt.legend(loc=2)
             plt.show()
+
+        x_est = next_x;
     
     if num_iter >= max_iter:
         print('\nmax iterations exceeded before convergence')
@@ -188,7 +216,6 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, 
     if dist[num_iter-1] - dist[num_iter-2] < threshold:
         print('\nconverged after ' + str(num_iter) + ' iterations:', dist[num_iter-1])
 
-    # return ests, dist
     return affine_est, dist
 
 
