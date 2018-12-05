@@ -168,6 +168,8 @@ def icp(x, y, threshold = 0.01, max_iter = 60, log_frequency = 15, ideal=False, 
         # re-order points via PCA to minimized distance between point clouds
         if not ideal:
             y_est = get_correspondence_points(x_est, y, 'both')
+        else:
+            y_est = y;
 
         # estimates of rotation (angles a), translation (distances t)
         a_est, t_est, _ = find_affine_transform(x_est, y_est)

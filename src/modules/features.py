@@ -1,5 +1,6 @@
 import numpy as np;
 from math import *;
+
 def smoothnessFeatures(P):
     """
     Compute loam smoothness features.
@@ -13,16 +14,21 @@ def smoothnessFeatures(P):
         F: computed features <list of float>.
     """
     F = [];
+    center = np.zeros((3));
+    for i in range(len(P)):
+        center += P[i];
+    center /= float(len(P));
     for i in range( len(P) ) :
+        magn = np.linalg.norm(P[i]-center);
+        if( magn == 0):
+            f = np.inf;
+            continue ;
         diff = 0;
         f = 0;
         for j in range ( len(P) ) :
             if(i != j):
                 diff+= (P[i] - P[j]);
-        if(P[i][0] == 0 and P[i][1] == 0 and P[i][2] == 0):
-            f = np.inf;
-        else:
-            f = np.linalg.norm(diff) / ( float(len(P)) * np.linalg.norm(P[i]) );
+        f = np.linalg.norm(diff) / ( float(len(P)) * magn );
         F.append(f);
     return F;
 
