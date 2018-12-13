@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+	<!-- <rosparam file="$(find navigation)/resources/arena_params.yaml"/> -->
+	<!-- <node name="back_end" pkg="navigation" type="back_end.py" output="screen"/> -->
+	<node name="icp_publisher" pkg="icp_node" type="icp_publisher.py" output="screen"/>
+
+	<!-- node pkg="rosbag" name="record" type="record" args="-a -o contact_free_flight"/ -->
+</launch>
