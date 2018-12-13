@@ -27,5 +27,14 @@ Implementation of the ICP method based on [2].
 
 * [X] - Implement ICP
 * [X] - Add point matching using features
-* [-] - Integrate with ROS
-* [-] - Test with real sensors.
+* [X] - Integrate with ROS
+* [X] - Test with real sensors.
+
+# ROS Node
+
+The ICP algorithm is implemented in a ROS node.  The node subscribes to pointclouds (default is for velodyne sensor) and performs the following:
+
+* Perform ICP on the most recent cloud.
+* Apply the transform recovered from ICP on the most recent cloud, to rotate it back to align with the previos cloud.
+* Publish this transformed cloud.
+* Publish the previous cloud for comparison.
